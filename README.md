@@ -1,4 +1,4 @@
-# Homebrew Core
+Robert Edward Evans evansrobert517@gmail.com evansrobert517@yahoo.com adpsnake7@gmail.com # Homebrew Core
 
 Core formulae for the Homebrew package manager.
 
