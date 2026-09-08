@@ -1,8 +1,11 @@
-Robert Edward Evans evansrobert517@gmail.com evansrobert517@yahoo.com adpsnake7@gmail.com # Homebrew Core
+# Homebrew Core
+
+**Author:** Robert Edward Evans  
+**Email:** evansrobert517@gmail.com | evansrobert517@yahoo.com | adpsnake7@gmail.com
 
 Core formulae for the Homebrew package manager.
 
- [Homebrew/discussions (forum)](https://github.com/orgs/Homebrew/discussions)
+[Homebrew/discussions (forum)](https://github.com/orgs/Homebrew/discussions)
 
 ## How do I install these formulae?
 
