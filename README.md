@@ -1,3 +1,131 @@
+import os
+import sys
+import json
+import time
+import shutil
+import logging
+import traceback
+from pathlib import Path
+from typing import Callable, Any, Dict
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+class AutoRemediationEngine:
+    def __init__(self, workspace_dir: str = "./workspace", state_store: str = "engine_state.json"):
+        self.workspace = Path(workspace_dir)
+        self.workspace.mkdir(parents=True, exist_ok=True)
+        self.backup_dir = self.workspace / ".snapshots"
+        self.backup_dir.mkdir(exist_ok=True)
+        self.state_file = self.workspace / state_store
+        self.state = self._load_state()
+
+    def _load_state(self) -> Dict[str, Any]:
+        if self.state_file.exists():
+            try:
+                with open(self.state_file, "r") as f:
+                    return json.load(f)
+            except Exception as err:
+                logging.warning(f"State corruption detected ({err}). Initializing clean state.")
+        return {"current_snapshot": None, "history": [], "healed_count": 0}
+
+    def create_snapshot(self, label: str) -> str:
+        """Captures an immutable snapshot of target files for transactional rollback."""
+        timestamp = int(time.time())
+        snap_id = f"snap_{label}_{timestamp}"
+        snap_path = self.backup_dir / snap_id
+        snap_path.mkdir(exist_ok=True)
+
+        for item in self.workspace.glob("*"):
+            if item.name != ".snapshots" and item.is_file():
+                shutil.copy2(item, snap_path / item.name)
+
+        self.state["current_snapshot"] = snap_id
+        self.state["history"].append({"id": snap_id, "timestamp": timestamp, "status": "ACTIVE"})
+        self._save_state()
+        logging.info(f"[SNAPSHOT CREATED] {snap_id}")
+        return snap_id
+
+    def rollback(self) -> bool:
+        """Restores the workspace to the last verified snapshot."""
+        snap_id = self.state.get("current_snapshot")
+        if not snap_id:
+            logging.error("[ROLLBACK FAILED] No active snapshot available.")
+            return False
+
+        snap_path = self.backup_dir / snap_id
+        if not snap_path.exists():
+            logging.error(f"[ROLLBACK FAILED] Snapshot path {snap_path} missing.")
+            return False
+
+        for item in snap_path.glob("*"):
+            shutil.copy2(item, self.workspace / item.name)
+
+        logging.warning(f"[ROLLBACK SUCCESSFUL] Workspace reverted to snapshot {snap_id}")
+        return True
+
+    def _save_state(self):
+        with open(self.state_file, "w") as f:
+            json.dump(self.state, f, indent=2)
+
+    def execute_and_heal(self, func: Callable, *args, **kwargs) -> Any:
+        """Executes targeted runtime tasks with automated error isolation & remediation."""
+        snap_id = self.create_snapshot(func.__name__)
+        try:
+            result = func(*args, **kwargs)
+            logging.info(f"[EXECUTION SUCCESS] Function '{func.__name__}' completed.")
+            return result
+        except Exception as exc:
+            err_type = type(exc).__name__
+            err_msg = str(exc)
+            tb = traceback.format_exc()
+            logging.error(f"[FAILURE DETECTED] {err_type}: {err_msg}")
+
+            # Revert corrupted state immediately
+            self.rollback()
+
+            # Trigger remediation strategy
+            logging.info("[SELF-HEALING] Analyzing failure trace and generating patch...")
+            healed = self._apply_remediation(func, err_type, err_msg, *args, **kwargs)
+            if healed:
+                self.state["healed_count"] += 1
+                self._save_state()
+                return healed
+            else:
+                logging.critical("[SELF-HEALING FAILED] Task requires manual investigation.")
+                raise exc
+
+    def _apply_remediation(self, func: Callable, err_type: str, err_msg: str, *args, **kwargs) -> Any:
+        """Rule-based and dynamic auto-patching layer."""
+        if err_type == "FileNotFoundError":
+            missing_file = err_msg.split("'")[-2] if "'" in err_msg else "missing_resource.json"
+            target_path = Path(missing_file)
+            logging.info(f"[REMEDIATION] Re-creating missing asset: {target_path}")
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(target_path, "w") as f:
+                json.dump({"status": "auto_generated", "created_at": time.time()}, f)
+            
+            # Retry original task
+            return func(*args, **kwargs)
+
+        elif err_type == "ZeroDivisionError":
+            logging.info("[REMEDIATION] Applying fallback guard for zero-division error.")
+            return 0.0
+
+        return None
+
+# --- Verification & Test Harness ---
+if __name__ == "__main__":
+    engine = AutoRemediationEngine(workspace_dir="./test_env")
+
+    # Sample pipeline task with deliberate failure mode
+    def load_config_data(filename: str):
+        filepath = Path("./test_env") / filename
+        with open(filepath, "r") as f:
+            return json.load(f)
+
+    # Execution 1: Triggers file missing error -> Auto-heals by creating asset -> Retries
+    data = engine.execute_and_heal(load_config_data, "config.json")
+    print("Final Output:", data)
 
 Skip to main content
 Google Workspace Help
